@@ -1,0 +1,39 @@
+# OS and editor files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.vscode/*
+!.vscode/settings.json
+
+# Node.js dependencies and logs
+**/node_modules/
+**/npm-debug.log*
+**/yarn-debug.log*
+**/yarn-error.log*
+**/pnpm-debug.log*
+
+# Environment and secrets
+**/.env
+**/.env.*
+!.env.example
+
+# Build artifacts
+**/dist/
+**/build/
+**/.next/
+**/coverage/
+**/.nyc_output/
+
+# Prisma and local DB/runtime artifacts
+**/prisma/dev.db
+**/prisma/*.db
+**/prisma/*.db-journal
+
+# Temp files
+*.tmp
+*.temp
+*.pid
+
+# Docker local overrides
+docker-compose.override.yml

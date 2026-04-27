@@ -1,0 +1,313 @@
+services:
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: event-booking-rabbitmq
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: appuser
+      RABBITMQ_DEFAULT_PASS: apppassword
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+  identity-db:
+    image: mysql:8.4
+    container_name: identity-db
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: identity_service
+      MYSQL_USER: identity
+      MYSQL_PASSWORD: identity_password
+    ports:
+      - "3307:3306"
+    volumes:
+      - identity_db_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-proot"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  event-db:
+    image: mysql:8.4
+    container_name: event-db
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: event_service
+      MYSQL_USER: event
+      MYSQL_PASSWORD: event_password
+    ports:
+      - "3308:3306"
+    volumes:
+      - event_db_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-proot"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  ticket-db:
+    image: mysql:8.4
+    container_name: ticket-db
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: ticket_service
+      MYSQL_USER: ticket
+      MYSQL_PASSWORD: ticket_password
+    ports:
+      - "3309:3306"
+    volumes:
+      - ticket_db_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-proot"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  booking-db:
+    image: mysql:8.4
+    container_name: booking-db
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: booking_service
+      MYSQL_USER: booking
+      MYSQL_PASSWORD: booking_password
+    ports:
+      - "3310:3306"
+    volumes:
+      - booking_db_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-proot"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  payment-db:
+    image: mysql:8.4
+    container_name: payment-db
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: payment_service
+      MYSQL_USER: payment
+      MYSQL_PASSWORD: payment_password
+    ports:
+      - "3311:3306"
+    volumes:
+      - payment_db_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-proot"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  notification-db:
+    image: mysql:8.4
+    container_name: notification-db
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: notification_service
+      MYSQL_USER: notification
+      MYSQL_PASSWORD: notification_password
+    ports:
+      - "3312:3306"
+    volumes:
+      - notification_db_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "127.0.0.1", "-uroot", "-proot"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  identity-service:
+    build:
+      context: ./identity-service
+    container_name: identity-service
+    depends_on:
+      identity-db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      PORT: 3001
+      DATABASE_URL: mysql://identity:identity_password@identity-db:3306/identity_service
+      RABBITMQ_URL: amqp://appuser:apppassword@rabbitmq:5672
+      JWT_SECRET: dev-jwt-secret
+    ports:
+      - "3001:3001"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'node -e "require(''http'').get(''http://127.0.0.1:3001/health'', res => { process.exit(res.statusCode === 200 ? 0 : 1); }).on(''error'', () => process.exit(1))"',
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  event-service:
+    build:
+      context: ./event-service
+    container_name: event-service
+    depends_on:
+      event-db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      PORT: 3002
+      DATABASE_URL: mysql://event:event_password@event-db:3306/event_service
+      RABBITMQ_URL: amqp://appuser:apppassword@rabbitmq:5672
+    ports:
+      - "3002:3002"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'node -e "require(''http'').get(''http://127.0.0.1:3002/health'', res => { process.exit(res.statusCode === 200 ? 0 : 1); }).on(''error'', () => process.exit(1))"',
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  ticket-service:
+    build:
+      context: ./ticket-service
+    container_name: ticket-service
+    depends_on:
+      ticket-db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      PORT: 3003
+      DATABASE_URL: mysql://ticket:ticket_password@ticket-db:3306/ticket_service
+      RABBITMQ_URL: amqp://appuser:apppassword@rabbitmq:5672
+    ports:
+      - "3003:3003"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'node -e "require(''http'').get(''http://127.0.0.1:3003/health'', res => { process.exit(res.statusCode === 200 ? 0 : 1); }).on(''error'', () => process.exit(1))"',
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  booking-service:
+    build:
+      context: ./booking-service
+    container_name: booking-service
+    depends_on:
+      booking-db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      identity-service:
+        condition: service_healthy
+      event-service:
+        condition: service_healthy
+      ticket-service:
+        condition: service_healthy
+      payment-service:
+        condition: service_healthy
+    environment:
+      PORT: 3004
+      DATABASE_URL: mysql://booking:booking_password@booking-db:3306/booking_service
+      RABBITMQ_URL: amqp://appuser:apppassword@rabbitmq:5672
+      IDENTITY_SERVICE_URL: http://identity-service:3001
+      EVENT_SERVICE_URL: http://event-service:3002
+      TICKET_SERVICE_URL: http://ticket-service:3003
+      PAYMENT_SERVICE_URL: http://payment-service:3005
+    ports:
+      - "3004:3004"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'node -e "require(''http'').get(''http://127.0.0.1:3004/health'', res => { process.exit(res.statusCode === 200 ? 0 : 1); }).on(''error'', () => process.exit(1))"',
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  payment-service:
+    build:
+      context: ./payment-service
+    container_name: payment-service
+    depends_on:
+      payment-db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      PORT: 3005
+      DATABASE_URL: mysql://payment:payment_password@payment-db:3306/payment_service
+      RABBITMQ_URL: amqp://appuser:apppassword@rabbitmq:5672
+    ports:
+      - "3005:3005"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'node -e "require(''http'').get(''http://127.0.0.1:3005/health'', res => { process.exit(res.statusCode === 200 ? 0 : 1); }).on(''error'', () => process.exit(1))"',
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+  notification-service:
+    build:
+      context: ./notification-service
+    container_name: notification-service
+    depends_on:
+      notification-db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    environment:
+      PORT: 3006
+      DATABASE_URL: mysql://notification:notification_password@notification-db:3306/notification_service
+      RABBITMQ_URL: amqp://appuser:apppassword@rabbitmq:5672
+    ports:
+      - "3006:3006"
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          'node -e "require(''http'').get(''http://127.0.0.1:3006/health'', res => { process.exit(res.statusCode === 200 ? 0 : 1); }).on(''error'', () => process.exit(1))"',
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 20s
+
+volumes:
+  identity_db_data:
+  event_db_data:
+  ticket_db_data:
+  booking_db_data:
+  payment_db_data:
+  notification_db_data:
