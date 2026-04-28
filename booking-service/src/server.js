@@ -15,6 +15,7 @@ const rabbitRetryDelayMs = 5000;
 let rabbitConnection;
 let rabbitChannel;
 const serviceBaseUrls = {
+  identity: process.env.IDENTITY_SERVICE_URL || "http://localhost:3001",
   event: process.env.EVENT_SERVICE_URL || "http://localhost:3002",
   ticket: process.env.TICKET_SERVICE_URL || "http://localhost:3003",
   payment: process.env.PAYMENT_SERVICE_URL || "http://localhost:3005",
@@ -22,6 +23,62 @@ const serviceBaseUrls = {
 
 app.use(cors());
 app.use(express.json());
+
+async function proxyRequest(targetBaseUrl, req, res) {
+  const targetUrl = `${targetBaseUrl}${req.url}`;
+
+  const headers = { ...req.headers };
+  delete headers.host;
+  delete headers.connection;
+  delete headers["content-length"];
+
+  const method = req.method.toUpperCase();
+  const canHaveBody = !["GET", "HEAD"].includes(method);
+  const body = canHaveBody && req.body != null ? JSON.stringify(req.body) : undefined;
+  if (body && !headers["content-type"]) {
+    headers["content-type"] = "application/json";
+  }
+
+  try {
+    const upstream = await fetch(targetUrl, {
+      method,
+      headers,
+      body,
+    });
+
+    const contentType = upstream.headers.get("content-type") || "";
+    const payload = await upstream.text();
+
+    res.status(upstream.status);
+    if (contentType) {
+      res.setHeader("content-type", contentType);
+    }
+
+    if (!payload) {
+      return res.send();
+    }
+
+    if (contentType.includes("application/json")) {
+      try {
+        return res.json(JSON.parse(payload));
+      } catch {
+        return res.send(payload);
+      }
+    }
+
+    return res.send(payload);
+  } catch (error) {
+    return res.status(502).json({
+      message: "Upstream request failed",
+      error: error.message,
+    });
+  }
+}
+
+// Public "BFF" routes for the frontend (other services stay internal-only in ACA)
+app.use("/api/identity", (req, res) => proxyRequest(serviceBaseUrls.identity, req, res));
+app.use("/api/event", (req, res) => proxyRequest(serviceBaseUrls.event, req, res));
+app.use("/api/ticket", (req, res) => proxyRequest(serviceBaseUrls.ticket, req, res));
 
 app.get("/health", (req, res) => {
   res.json({ service: "booking-service", status: "ok" });

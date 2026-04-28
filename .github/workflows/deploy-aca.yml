@@ -224,3 +224,97 @@ jobs:
           $url = "https://$fqdn/health"
           Write-Host "GET $url"
           Invoke-RestMethod -Method Get -Uri $url
+
+  deploy_frontend:
+    name: Deploy Frontend (Static Website)
+    runs-on: ubuntu-latest
+    needs: [ deploy ]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Build frontend (Vite)
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          RG='${{ secrets.AZURE_RESOURCE_GROUP }}'
+          FQDN=$(az containerapp show --name booking-service --resource-group "$RG" --query "properties.configuration.ingress.fqdn" -o tsv)
+          if [ -z "$FQDN" ]; then
+            echo 'Failed to resolve booking-service FQDN'
+            exit 1
+          fi
+
+          echo "Using API base URL: https://$FQDN"
+
+          cd frontend
+          npm ci
+          VITE_API_BASE_URL="https://$FQDN" npm run build
+
+      - name: Create/Update Storage static website + upload
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          RG='${{ secrets.AZURE_RESOURCE_GROUP }}'
+          LOCATION='${{ secrets.AZURE_LOCATION }}'
+
+          # Storage account names must be globally unique and <= 24 chars.
+          # ACR_NAME is already globally unique in your setup, so we derive from it.
+          ACR='${{ secrets.ACR_NAME }}'
+          STORAGE="stweb${ACR}"
+          STORAGE=$(echo "$STORAGE" | tr '[:upper:]' '[:lower:]')
+          STORAGE=${STORAGE:0:24}
+
+          echo "Using storage account: $STORAGE"
+
+          if ! az storage account show --name "$STORAGE" --resource-group "$RG" >/dev/null 2>&1; then
+            az storage account create \
+              --name "$STORAGE" \
+              --resource-group "$RG" \
+              --location "$LOCATION" \
+              --sku Standard_LRS \
+              --kind StorageV2 \
+              --allow-blob-public-access true \
+              -o none
+          fi
+
+          KEY=$(az storage account keys list --name "$STORAGE" --resource-group "$RG" --query "[0].value" -o tsv)
+          if [ -z "$KEY" ]; then
+            echo 'Failed to retrieve storage account key'
+            exit 1
+          fi
+
+          az storage blob service-properties update \
+            --account-name "$STORAGE" \
+            --account-key "$KEY" \
+            --static-website \
+            --index-document index.html \
+            --404-document index.html \
+            -o none
+
+          az storage blob upload-batch \
+            --account-name "$STORAGE" \
+            --account-key "$KEY" \
+            --destination '$web' \
+            --source frontend/dist \
+            --overwrite \
+            -o none
+
+          URL=$(az storage account show --name "$STORAGE" --resource-group "$RG" --query "primaryEndpoints.web" -o tsv)
+          echo "Frontend deployed to: $URL"

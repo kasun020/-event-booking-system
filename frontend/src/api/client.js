@@ -1,8 +1,11 @@
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:3004';
+
 const SERVICES = {
-  identity: 'http://localhost:3001',
-  event: 'http://localhost:3002',
-  ticket: 'http://localhost:3003',
-  booking: 'http://localhost:3004',
+  // In Azure, only booking-service is public. These are proxied via booking-service.
+  identity: `${API_BASE_URL}/api/identity`,
+  event: `${API_BASE_URL}/api/event`,
+  ticket: `${API_BASE_URL}/api/ticket`,
+  booking: API_BASE_URL,
 };
 
 export { SERVICES };
