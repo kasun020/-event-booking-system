@@ -1,0 +1,160 @@
+name: Deploy to Azure Container Apps
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch: {}
+
+permissions:
+  id-token: write
+  contents: read
+
+env:
+  ACR_LOGIN_SERVER: ${{ secrets.ACR_NAME }}.azurecr.io
+
+jobs:
+  build_and_push:
+    name: Build & Push Images
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service:
+          - identity-service
+          - event-service
+          - ticket-service
+          - booking-service
+          - payment-service
+          - notification-service
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: ACR Login
+        run: az acr login --name "${{ secrets.ACR_NAME }}"
+
+      - name: Build image
+        run: |
+          docker build \
+            -t "${{ env.ACR_LOGIN_SERVER }}/${{ matrix.service }}:${{ github.sha }}" \
+            "./${{ matrix.service }}"
+
+      - name: Push image
+        run: |
+          docker push "${{ env.ACR_LOGIN_SERVER }}/${{ matrix.service }}:${{ github.sha }}"
+
+  deploy:
+    name: Deploy to ACA + Migrate
+    runs-on: ubuntu-latest
+    needs: [ build_and_push ]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Install/Upgrade containerapp extension
+        run: az extension add --name containerapp --upgrade
+
+      - name: Deploy Container Apps (and create migration jobs)
+        shell: pwsh
+        run: |
+          ./deploy/azure/deploy.ps1 \
+            -ResourceGroupName "${{ secrets.AZURE_RESOURCE_GROUP }}" \
+            -Location "${{ secrets.AZURE_LOCATION }}" \
+            -AcrName "${{ secrets.ACR_NAME }}" \
+            -ContainerAppsEnvName "${{ secrets.ACA_ENV_NAME }}" \
+            -ImageTag "${{ github.sha }}" \
+            -JwtSecret "${{ secrets.JWT_SECRET }}" \
+            -RabbitMqUser "${{ secrets.RABBITMQ_USER }}" \
+            -RabbitMqPass "${{ secrets.RABBITMQ_PASS }}" \
+            -IdentityDatabaseUrl "${{ secrets.IDENTITY_DATABASE_URL }}" \
+            -EventDatabaseUrl "${{ secrets.EVENT_DATABASE_URL }}" \
+            -TicketDatabaseUrl "${{ secrets.TICKET_DATABASE_URL }}" \
+            -BookingDatabaseUrl "${{ secrets.BOOKING_DATABASE_URL }}"
+
+      - name: Run Prisma migrations (ACA Jobs)
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $rg = "${{ secrets.AZURE_RESOURCE_GROUP }}"
+          $jobs = @(
+            'identity-service-migrate',
+            'event-service-migrate',
+            'ticket-service-migrate',
+            'booking-service-migrate'
+          )
+
+          function Get-LatestExecutionStatus([string]$jobName) {
+            $executionsJson = az containerapp job execution list --name $jobName --resource-group $rg -o json
+            if (-not $executionsJson) { return $null }
+
+            $executions = $executionsJson | ConvertFrom-Json
+            if (-not $executions -or $executions.Count -lt 1) { return $null }
+
+            # Try to pick the latest by startTime if present
+            $latest = $executions | Sort-Object { $_.properties.startTime } -Descending | Select-Object -First 1
+            if (-not $latest) { $latest = $executions | Select-Object -First 1 }
+
+            return $latest.properties.status
+          }
+
+          foreach ($job in $jobs) {
+            Write-Host "Starting migration job: $job"
+            az containerapp job start --name $job --resource-group $rg -o none
+
+            $status = $null
+            $maxWaitMinutes = 15
+            $deadline = (Get-Date).AddMinutes($maxWaitMinutes)
+
+            while ((Get-Date) -lt $deadline) {
+              $status = Get-LatestExecutionStatus $job
+              if ($status) {
+                Write-Host "  $job status: $status"
+              }
+
+              if ($status -match 'Succeeded|Completed') {
+                break
+              }
+              if ($status -match 'Failed|Error') {
+                throw "Migration job failed: $job (status=$status)"
+              }
+
+              Start-Sleep -Seconds 10
+            }
+
+            if (-not $status) {
+              throw "Could not determine migration job status for: $job"
+            }
+            if ($status -notmatch 'Succeeded|Completed') {
+              throw "Migration job did not succeed: $job (status=$status)"
+            }
+          }
+
+      - name: Smoke test booking-service /health
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+
+          $rg = "${{ secrets.AZURE_RESOURCE_GROUP }}"
+          $fqdn = az containerapp show --name booking-service --resource-group $rg --query "properties.configuration.ingress.fqdn" -o tsv
+          if (-not $fqdn) { throw 'Failed to resolve booking-service FQDN' }
+
+          $url = "https://$fqdn/health"
+          Write-Host "GET $url"
+          Invoke-RestMethod -Method Get -Uri $url
