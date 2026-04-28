@@ -71,6 +71,33 @@ $acrPassword = $acrCred.passwords[0].value
 
 $rabbitMqUrl = "amqp://${RabbitMqUser}:${RabbitMqPass}@rabbitmq:5672"
 
+function Ensure-MySqlSsl {
+  param(
+    [Parameter(Mandatory = $true)][string]$Url
+  )
+
+  if ($Url -notmatch '^mysql://') {
+    return $Url
+  }
+
+  # If sslaccept is already present, leave as-is
+  if ($Url -match '(^|[?&])sslaccept=') {
+    return $Url
+  }
+
+  $separator = "?"
+  if ($Url.Contains("?")) {
+    $separator = "&"
+  }
+
+  return ($Url + $separator + "sslaccept=strict")
+}
+
+$IdentityDatabaseUrl = Ensure-MySqlSsl -Url $IdentityDatabaseUrl
+$EventDatabaseUrl    = Ensure-MySqlSsl -Url $EventDatabaseUrl
+$TicketDatabaseUrl   = Ensure-MySqlSsl -Url $TicketDatabaseUrl
+$BookingDatabaseUrl  = Ensure-MySqlSsl -Url $BookingDatabaseUrl
+
 function Set-ContainerApp {
   param(
     [Parameter(Mandatory = $true)][string]$Name,
@@ -160,7 +187,7 @@ function Set-PrismaMigrationJob {
       "--registry-username $acrUsername",
       "--registry-password $acrPassword",
       "--command npx",
-      "--args `"prisma migrate deploy`"",
+      "--args prisma migrate deploy",
       "--env-vars DATABASE_URL=$DatabaseUrl"
     )
 
@@ -173,6 +200,8 @@ function Set-PrismaMigrationJob {
       "--name $jobName",
       "--resource-group $ResourceGroupName",
       "--image $Image",
+      "--command npx",
+      "--args prisma migrate deploy",
       "--set-env-vars DATABASE_URL=$DatabaseUrl"
     )
 
