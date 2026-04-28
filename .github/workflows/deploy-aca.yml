@@ -31,6 +31,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Validate required secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          [ -n "${{ secrets.AZURE_CLIENT_ID }}" ] || { echo "Missing GitHub Actions secret: AZURE_CLIENT_ID"; exit 1; }
+          [ -n "${{ secrets.AZURE_TENANT_ID }}" ] || { echo "Missing GitHub Actions secret: AZURE_TENANT_ID"; exit 1; }
+          [ -n "${{ secrets.AZURE_SUBSCRIPTION_ID }}" ] || { echo "Missing GitHub Actions secret: AZURE_SUBSCRIPTION_ID"; exit 1; }
+          [ -n "${{ secrets.ACR_NAME }}" ] || { echo "Missing GitHub Actions secret: ACR_NAME"; exit 1; }
+
       - name: Azure Login (OIDC)
         uses: azure/login@v2
         with:
@@ -60,6 +69,25 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Validate required secrets
+        shell: bash
+        run: |
+          set -euo pipefail
+          [ -n "${{ secrets.AZURE_CLIENT_ID }}" ] || { echo "Missing GitHub Actions secret: AZURE_CLIENT_ID"; exit 1; }
+          [ -n "${{ secrets.AZURE_TENANT_ID }}" ] || { echo "Missing GitHub Actions secret: AZURE_TENANT_ID"; exit 1; }
+          [ -n "${{ secrets.AZURE_SUBSCRIPTION_ID }}" ] || { echo "Missing GitHub Actions secret: AZURE_SUBSCRIPTION_ID"; exit 1; }
+          [ -n "${{ secrets.AZURE_RESOURCE_GROUP }}" ] || { echo "Missing GitHub Actions secret: AZURE_RESOURCE_GROUP"; exit 1; }
+          [ -n "${{ secrets.AZURE_LOCATION }}" ] || { echo "Missing GitHub Actions secret: AZURE_LOCATION"; exit 1; }
+          [ -n "${{ secrets.ACR_NAME }}" ] || { echo "Missing GitHub Actions secret: ACR_NAME"; exit 1; }
+          [ -n "${{ secrets.ACA_ENV_NAME }}" ] || { echo "Missing GitHub Actions secret: ACA_ENV_NAME"; exit 1; }
+          [ -n "${{ secrets.JWT_SECRET }}" ] || { echo "Missing GitHub Actions secret: JWT_SECRET"; exit 1; }
+          [ -n "${{ secrets.RABBITMQ_USER }}" ] || { echo "Missing GitHub Actions secret: RABBITMQ_USER"; exit 1; }
+          [ -n "${{ secrets.RABBITMQ_PASS }}" ] || { echo "Missing GitHub Actions secret: RABBITMQ_PASS"; exit 1; }
+          [ -n "${{ secrets.IDENTITY_DATABASE_URL }}" ] || { echo "Missing GitHub Actions secret: IDENTITY_DATABASE_URL"; exit 1; }
+          [ -n "${{ secrets.EVENT_DATABASE_URL }}" ] || { echo "Missing GitHub Actions secret: EVENT_DATABASE_URL"; exit 1; }
+          [ -n "${{ secrets.TICKET_DATABASE_URL }}" ] || { echo "Missing GitHub Actions secret: TICKET_DATABASE_URL"; exit 1; }
+          [ -n "${{ secrets.BOOKING_DATABASE_URL }}" ] || { echo "Missing GitHub Actions secret: BOOKING_DATABASE_URL"; exit 1; }
+
       - name: Azure Login (OIDC)
         uses: azure/login@v2
         with:
@@ -74,18 +102,18 @@ jobs:
         shell: pwsh
         run: |
           ./deploy/azure/deploy.ps1 \
-            -ResourceGroupName "${{ secrets.AZURE_RESOURCE_GROUP }}" \
-            -Location "${{ secrets.AZURE_LOCATION }}" \
-            -AcrName "${{ secrets.ACR_NAME }}" \
-            -ContainerAppsEnvName "${{ secrets.ACA_ENV_NAME }}" \
-            -ImageTag "${{ github.sha }}" \
-            -JwtSecret "${{ secrets.JWT_SECRET }}" \
-            -RabbitMqUser "${{ secrets.RABBITMQ_USER }}" \
-            -RabbitMqPass "${{ secrets.RABBITMQ_PASS }}" \
-            -IdentityDatabaseUrl "${{ secrets.IDENTITY_DATABASE_URL }}" \
-            -EventDatabaseUrl "${{ secrets.EVENT_DATABASE_URL }}" \
-            -TicketDatabaseUrl "${{ secrets.TICKET_DATABASE_URL }}" \
-            -BookingDatabaseUrl "${{ secrets.BOOKING_DATABASE_URL }}"
+            -ResourceGroupName '${{ secrets.AZURE_RESOURCE_GROUP }}' \
+            -Location '${{ secrets.AZURE_LOCATION }}' \
+            -AcrName '${{ secrets.ACR_NAME }}' \
+            -ContainerAppsEnvName '${{ secrets.ACA_ENV_NAME }}' \
+            -ImageTag '${{ github.sha }}' \
+            -JwtSecret '${{ secrets.JWT_SECRET }}' \
+            -RabbitMqUser '${{ secrets.RABBITMQ_USER }}' \
+            -RabbitMqPass '${{ secrets.RABBITMQ_PASS }}' \
+            -IdentityDatabaseUrl '${{ secrets.IDENTITY_DATABASE_URL }}' \
+            -EventDatabaseUrl '${{ secrets.EVENT_DATABASE_URL }}' \
+            -TicketDatabaseUrl '${{ secrets.TICKET_DATABASE_URL }}' \
+            -BookingDatabaseUrl '${{ secrets.BOOKING_DATABASE_URL }}'
 
       - name: Run Prisma migrations (ACA Jobs)
         shell: pwsh
