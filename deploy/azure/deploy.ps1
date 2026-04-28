@@ -44,17 +44,14 @@ $ErrorActionPreference = "Stop"
 
 $null = az extension add --name containerapp --upgrade -o none
 
+# FIX 1: Use & az directly and check $LASTEXITCODE instead of Invoke-Expression
 function Test-AzResourceExists {
   param(
-    [Parameter(Mandatory = $true)][string]$Command
+    [Parameter(Mandatory = $true)][string[]]$Args
   )
 
-  try {
-    $null = Invoke-Expression $Command
-    return $true
-  } catch {
-    return $false
-  }
+  & az @Args -o none 2>&1 | Out-Null
+  return $LASTEXITCODE -eq 0
 }
 
 function ConvertTo-EnvArgs {
@@ -72,24 +69,24 @@ $acrCred = az acr credential show --name $AcrName | ConvertFrom-Json
 $acrUsername = $acrCred.username
 $acrPassword = $acrCred.passwords[0].value
 
-$rabbitMqUrl = "amqp://$RabbitMqUser`:$RabbitMqPass@rabbitmq:5672"
+$rabbitMqUrl = "amqp://${RabbitMqUser}:${RabbitMqPass}@rabbitmq:5672"
 
 function Set-ContainerApp {
   param(
     [Parameter(Mandatory = $true)][string]$Name,
     [Parameter(Mandatory = $true)][string]$Image,
-    [Parameter(Mandatory = $true)][string]$Ingress, # external|internal|disabled
+    [Parameter(Mandatory = $true)][string]$Ingress,
     [Parameter(Mandatory = $true)][int]$TargetPort,
-    [string]$Transport = "http", # http|tcp
-    [hashtable]$Env = @{},
-    [switch]$NoIngress
+    [string]$Transport = "http",
+    [hashtable]$Env = @{}
   )
 
   $envArgs = ConvertTo-EnvArgs $Env
 
-  $exists = Test-AzResourceExists "az containerapp show --name $Name --resource-group $ResourceGroupName -o none"
+  $exists = Test-AzResourceExists @('containerapp', 'show', '--name', $Name, '--resource-group', $ResourceGroupName)
 
   if (-not $exists) {
+    # CREATE - all args supported
     $createCmd = @(
       "az containerapp create",
       "--name $Name",
@@ -119,22 +116,13 @@ function Set-ContainerApp {
     Invoke-Expression (($createCmd -join " ") + " -o none")
     Write-Host "Created Container App: $Name"
   } else {
+    # FIX 2: UPDATE - only supported args (no --ingress, --target-port, --transport, --registry-*)
     $updateCmd = @(
       "az containerapp update",
       "--name $Name",
       "--resource-group $ResourceGroupName",
       "--image $Image"
     )
-
-    if ($Ingress -eq "disabled") {
-      $updateCmd += "--ingress disabled"
-    } else {
-      $updateCmd += "--ingress $Ingress"
-      $updateCmd += "--target-port $TargetPort"
-      if ($Transport -ne "http") {
-        $updateCmd += "--transport $Transport"
-      }
-    }
 
     if ($envArgs.Count -gt 0) {
       $updateCmd += ("--set-env-vars {0}" -f ($envArgs -join " "))
@@ -154,9 +142,10 @@ function Set-PrismaMigrationJob {
 
   $jobName = "$ServiceName-migrate"
 
-  $exists = Test-AzResourceExists "az containerapp job show --name $jobName --resource-group $ResourceGroupName -o none"
+  $exists = Test-AzResourceExists @('containerapp', 'job', 'show', '--name', $jobName, '--resource-group', $ResourceGroupName)
 
   if (-not $exists) {
+    # CREATE - all args supported
     $cmd = @(
       "az containerapp job create",
       "--name $jobName",
@@ -172,24 +161,20 @@ function Set-PrismaMigrationJob {
       "--registry-username $acrUsername",
       "--registry-password $acrPassword",
       "--command npx",
-      "--args prisma migrate deploy",
+      "--args `"prisma migrate deploy`"",
       "--env-vars DATABASE_URL=$DatabaseUrl"
     )
 
     Invoke-Expression (($cmd -join " ") + " -o none")
     Write-Host "Created migration job: $jobName"
   } else {
+    # FIX 2: UPDATE - only supported args (no --registry-*)
     $cmd = @(
       "az containerapp job update",
       "--name $jobName",
       "--resource-group $ResourceGroupName",
       "--image $Image",
-      "--registry-server $acrLoginServer",
-      "--registry-username $acrUsername",
-      "--registry-password $acrPassword",
-      "--set-env-vars DATABASE_URL=$DatabaseUrl",
-      "--command npx",
-      "--args prisma migrate deploy"
+      "--set-env-vars DATABASE_URL=$DatabaseUrl"
     )
 
     Invoke-Expression (($cmd -join " ") + " -o none")
@@ -199,7 +184,7 @@ function Set-PrismaMigrationJob {
 
 # --------------------
 # Deploy ordering
-# rabbitmq → identity/event/ticket/payment → booking → notification
+# rabbitmq -> identity/event/ticket/payment -> booking -> notification
 # --------------------
 
 # 1) RabbitMQ
@@ -208,59 +193,59 @@ Set-ContainerApp -Name "rabbitmq" -Image "rabbitmq:3-management" -Ingress "inter
   RABBITMQ_DEFAULT_PASS = $RabbitMqPass
 }
 
-# 2) Create/update Prisma migration jobs (manual trigger; workflow starts them)
+# 2) Prisma migration jobs
 $identityImage = "$acrLoginServer/identity-service:$ImageTag"
-$eventImage = "$acrLoginServer/event-service:$ImageTag"
-$ticketImage = "$acrLoginServer/ticket-service:$ImageTag"
-$bookingImage = "$acrLoginServer/booking-service:$ImageTag"
+$eventImage    = "$acrLoginServer/event-service:$ImageTag"
+$ticketImage   = "$acrLoginServer/ticket-service:$ImageTag"
+$bookingImage  = "$acrLoginServer/booking-service:$ImageTag"
 
 Set-PrismaMigrationJob -ServiceName "identity-service" -Image $identityImage -DatabaseUrl $IdentityDatabaseUrl
-Set-PrismaMigrationJob -ServiceName "event-service" -Image $eventImage -DatabaseUrl $EventDatabaseUrl
-Set-PrismaMigrationJob -ServiceName "ticket-service" -Image $ticketImage -DatabaseUrl $TicketDatabaseUrl
-Set-PrismaMigrationJob -ServiceName "booking-service" -Image $bookingImage -DatabaseUrl $BookingDatabaseUrl
+Set-PrismaMigrationJob -ServiceName "event-service"    -Image $eventImage    -DatabaseUrl $EventDatabaseUrl
+Set-PrismaMigrationJob -ServiceName "ticket-service"   -Image $ticketImage   -DatabaseUrl $TicketDatabaseUrl
+Set-PrismaMigrationJob -ServiceName "booking-service"  -Image $bookingImage  -DatabaseUrl $BookingDatabaseUrl
 
 # 3) Services
 Set-ContainerApp -Name "identity-service" -Image $identityImage -Ingress "internal" -TargetPort 3001 -Env @{
-  PORT = "3001"
-  JWT_SECRET = $JwtSecret
+  PORT         = "3001"
+  JWT_SECRET   = $JwtSecret
   DATABASE_URL = $IdentityDatabaseUrl
   RABBITMQ_URL = $rabbitMqUrl
 }
 
 Set-ContainerApp -Name "event-service" -Image $eventImage -Ingress "internal" -TargetPort 3002 -Env @{
-  PORT = "3002"
-  JWT_SECRET = $JwtSecret
+  PORT         = "3002"
+  JWT_SECRET   = $JwtSecret
   DATABASE_URL = $EventDatabaseUrl
   RABBITMQ_URL = $rabbitMqUrl
 }
 
 Set-ContainerApp -Name "ticket-service" -Image $ticketImage -Ingress "internal" -TargetPort 3003 -Env @{
-  PORT = "3003"
+  PORT         = "3003"
   DATABASE_URL = $TicketDatabaseUrl
   RABBITMQ_URL = $rabbitMqUrl
 }
 
 $paymentImage = "$acrLoginServer/payment-service:$ImageTag"
 Set-ContainerApp -Name "payment-service" -Image $paymentImage -Ingress "internal" -TargetPort 3005 -Env @{
-  PORT = "3005"
+  PORT         = "3005"
   RABBITMQ_URL = $rabbitMqUrl
 }
 
-# booking-service recommended public entrypoint
+# booking-service is the only public entrypoint
 Set-ContainerApp -Name "booking-service" -Image $bookingImage -Ingress "external" -TargetPort 3004 -Env @{
-  PORT = "3004"
-  DATABASE_URL = $BookingDatabaseUrl
-  RABBITMQ_URL = $rabbitMqUrl
-  EVENT_SERVICE_URL = "http://event-service"
-  TICKET_SERVICE_URL = "http://ticket-service"
-  PAYMENT_SERVICE_URL = "http://payment-service"
+  PORT                 = "3004"
+  DATABASE_URL         = $BookingDatabaseUrl
+  RABBITMQ_URL         = $rabbitMqUrl
+  EVENT_SERVICE_URL    = "http://event-service"
+  TICKET_SERVICE_URL   = "http://ticket-service"
+  PAYMENT_SERVICE_URL  = "http://payment-service"
   IDENTITY_SERVICE_URL = "http://identity-service"
 }
 
 $notificationImage = "$acrLoginServer/notification-service:$ImageTag"
 Set-ContainerApp -Name "notification-service" -Image $notificationImage -Ingress "disabled" -TargetPort 3006 -Env @{
-  PORT = "3006"
+  PORT         = "3006"
   RABBITMQ_URL = $rabbitMqUrl
 }
 
-Write-Host "\nDeploy script finished. Next: start the 4 migration jobs (identity/event/ticket/booking)."
+Write-Host "`nDeploy script finished. Next: start the 4 migration jobs (identity/event/ticket/booking)."
