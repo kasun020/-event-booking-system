@@ -121,19 +121,37 @@ jobs:
       - name: Deploy Container Apps (and create migration jobs)
         shell: pwsh
         run: |
-          ./deploy/azure/deploy.ps1 \
-            -ResourceGroupName '${{ secrets.AZURE_RESOURCE_GROUP }}' \
-            -Location '${{ secrets.AZURE_LOCATION }}' \
-            -AcrName '${{ secrets.ACR_NAME }}' \
-            -ContainerAppsEnvName '${{ secrets.ACA_ENV_NAME }}' \
-            -ImageTag '${{ github.sha }}' \
-            -JwtSecret '${{ secrets.JWT_SECRET }}' \
-            -RabbitMqUser '${{ secrets.RABBITMQ_USER }}' \
-            -RabbitMqPass '${{ secrets.RABBITMQ_PASS }}' \
-            -IdentityDatabaseUrl '${{ secrets.IDENTITY_DATABASE_URL }}' \
-            -EventDatabaseUrl '${{ secrets.EVENT_DATABASE_URL }}' \
-            -TicketDatabaseUrl '${{ secrets.TICKET_DATABASE_URL }}' \
-            -BookingDatabaseUrl '${{ secrets.BOOKING_DATABASE_URL }}'
+          $ErrorActionPreference = 'Stop'
+
+          $params = @{
+            ResourceGroupName    = $env:AZURE_RESOURCE_GROUP
+            Location             = $env:AZURE_LOCATION
+            AcrName              = $env:ACR_NAME
+            ContainerAppsEnvName = $env:ACA_ENV_NAME
+            ImageTag             = $env:IMAGE_TAG
+            JwtSecret            = $env:JWT_SECRET
+            RabbitMqUser         = $env:RABBITMQ_USER
+            RabbitMqPass         = $env:RABBITMQ_PASS
+            IdentityDatabaseUrl  = $env:IDENTITY_DATABASE_URL
+            EventDatabaseUrl     = $env:EVENT_DATABASE_URL
+            TicketDatabaseUrl    = $env:TICKET_DATABASE_URL
+            BookingDatabaseUrl   = $env:BOOKING_DATABASE_URL
+          }
+
+          & ./deploy/azure/deploy.ps1 @params
+        env:
+          AZURE_RESOURCE_GROUP: ${{ secrets.AZURE_RESOURCE_GROUP }}
+          AZURE_LOCATION: ${{ secrets.AZURE_LOCATION }}
+          ACR_NAME: ${{ secrets.ACR_NAME }}
+          ACA_ENV_NAME: ${{ secrets.ACA_ENV_NAME }}
+          IMAGE_TAG: ${{ github.sha }}
+          JWT_SECRET: ${{ secrets.JWT_SECRET }}
+          RABBITMQ_USER: ${{ secrets.RABBITMQ_USER }}
+          RABBITMQ_PASS: ${{ secrets.RABBITMQ_PASS }}
+          IDENTITY_DATABASE_URL: ${{ secrets.IDENTITY_DATABASE_URL }}
+          EVENT_DATABASE_URL: ${{ secrets.EVENT_DATABASE_URL }}
+          TICKET_DATABASE_URL: ${{ secrets.TICKET_DATABASE_URL }}
+          BOOKING_DATABASE_URL: ${{ secrets.BOOKING_DATABASE_URL }}
 
       - name: Run Prisma migrations (ACA Jobs)
         shell: pwsh
