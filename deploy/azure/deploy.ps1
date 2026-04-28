@@ -91,19 +91,18 @@ function Set-ContainerApp {
       "az containerapp create",
       "--name $Name",
       "--resource-group $ResourceGroupName",
-      "--location $Location",
       "--environment $ContainerAppsEnvName",
       "--image $Image",
       "--registry-server $acrLoginServer",
       "--registry-username $acrUsername",
-      "--registry-password $acrPassword",
-      "--target-port $TargetPort"
+      "--registry-password $acrPassword"
     )
 
     if ($Ingress -eq "disabled") {
-      $createCmd += "--ingress disabled"
+      # disabled = omit --ingress and --target-port entirely
     } else {
       $createCmd += "--ingress $Ingress"
+      $createCmd += "--target-port $TargetPort"
       if ($Transport -ne "http") {
         $createCmd += "--transport $Transport"
       }
