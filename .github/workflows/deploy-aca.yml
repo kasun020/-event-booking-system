@@ -348,7 +348,7 @@ jobs:
               -o none
           fi
 
-          KEY=$(az storage account keys list --name "$STORAGE" --resource-group "$RG" --subscription "$SUB" --query "[0].value" -o tsv)
+          KEY=$(az storage account keys list --account-name "$STORAGE" --resource-group "$RG" --subscription "$SUB" --query "[0].value" -o tsv)
           if [ -z "$KEY" ]; then
             echo 'Failed to retrieve storage account key'
             exit 1
