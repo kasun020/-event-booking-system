@@ -328,6 +328,13 @@ jobs:
 
           echo "Using storage account: $STORAGE"
 
+          # Ensure the Storage resource provider is registered (required to create storage accounts)
+          PROVIDER_STATE=$(az provider show --namespace Microsoft.Storage --subscription "$SUB" --query "registrationState" -o tsv 2>/dev/null || true)
+          if [ "$PROVIDER_STATE" != "Registered" ]; then
+            echo "Registering Microsoft.Storage provider (current state: ${PROVIDER_STATE:-unknown})"
+            az provider register --namespace Microsoft.Storage --subscription "$SUB" --wait -o none
+          fi
+
           if ! az storage account show --name "$STORAGE" --resource-group "$RG" --subscription "$SUB" >/dev/null 2>&1; then
             az storage account create \
               --name "$STORAGE" \
@@ -336,6 +343,7 @@ jobs:
               --location "$LOCATION" \
               --sku Standard_LRS \
               --kind StorageV2 \
+              --min-tls-version TLS1_2 \
               --allow-blob-public-access true \
               -o none
           fi
