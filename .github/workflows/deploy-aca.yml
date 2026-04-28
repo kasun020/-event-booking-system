@@ -266,6 +266,22 @@ jobs:
           az account set --subscription "${{ secrets.AZURE_SUBSCRIPTION_ID }}"
           az account show --query "{subscriptionId:id, tenantId:tenantId}" -o table
 
+      - name: Diagnose Azure access
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          SUB_SECRET='${{ secrets.AZURE_SUBSCRIPTION_ID }}'
+          RG='${{ secrets.AZURE_RESOURCE_GROUP }}'
+
+          echo "Secret subscription tail: ${SUB_SECRET: -6}"
+
+          SUB_EFFECTIVE=$(az account show --query id -o tsv)
+          echo "Effective subscription tail: ${SUB_EFFECTIVE: -6}"
+
+          echo "Checking access to resource group: $RG"
+          az group show --name "$RG" --subscription "$SUB_SECRET" -o none
+
       - name: Set up Node
         uses: actions/setup-node@v4
         with:
@@ -279,7 +295,8 @@ jobs:
           set -euo pipefail
 
           RG='${{ secrets.AZURE_RESOURCE_GROUP }}'
-          FQDN=$(az containerapp show --name booking-service --resource-group "$RG" --query "properties.configuration.ingress.fqdn" -o tsv)
+          SUB='${{ secrets.AZURE_SUBSCRIPTION_ID }}'
+          FQDN=$(az containerapp show --subscription "$SUB" --name booking-service --resource-group "$RG" --query "properties.configuration.ingress.fqdn" -o tsv)
           if [ -z "$FQDN" ]; then
             echo 'Failed to resolve booking-service FQDN'
             exit 1
@@ -296,7 +313,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          az account set --subscription "${{ secrets.AZURE_SUBSCRIPTION_ID }}"
+          SUB='${{ secrets.AZURE_SUBSCRIPTION_ID }}'
+          az account set --subscription "$SUB"
 
           RG='${{ secrets.AZURE_RESOURCE_GROUP }}'
           LOCATION='${{ secrets.AZURE_LOCATION }}'
@@ -310,10 +328,11 @@ jobs:
 
           echo "Using storage account: $STORAGE"
 
-          if ! az storage account show --name "$STORAGE" --resource-group "$RG" >/dev/null 2>&1; then
+          if ! az storage account show --name "$STORAGE" --resource-group "$RG" --subscription "$SUB" >/dev/null 2>&1; then
             az storage account create \
               --name "$STORAGE" \
               --resource-group "$RG" \
+              --subscription "$SUB" \
               --location "$LOCATION" \
               --sku Standard_LRS \
               --kind StorageV2 \
@@ -321,13 +340,14 @@ jobs:
               -o none
           fi
 
-          KEY=$(az storage account keys list --name "$STORAGE" --resource-group "$RG" --query "[0].value" -o tsv)
+          KEY=$(az storage account keys list --name "$STORAGE" --resource-group "$RG" --subscription "$SUB" --query "[0].value" -o tsv)
           if [ -z "$KEY" ]; then
             echo 'Failed to retrieve storage account key'
             exit 1
           fi
 
           az storage blob service-properties update \
+            --subscription "$SUB" \
             --account-name "$STORAGE" \
             --account-key "$KEY" \
             --static-website \
@@ -336,6 +356,7 @@ jobs:
             -o none
 
           az storage blob upload-batch \
+            --subscription "$SUB" \
             --account-name "$STORAGE" \
             --account-key "$KEY" \
             --destination '$web' \
@@ -343,5 +364,5 @@ jobs:
             --overwrite \
             -o none
 
-          URL=$(az storage account show --name "$STORAGE" --resource-group "$RG" --query "primaryEndpoints.web" -o tsv)
+          URL=$(az storage account show --name "$STORAGE" --resource-group "$RG" --subscription "$SUB" --query "primaryEndpoints.web" -o tsv)
           echo "Frontend deployed to: $URL"
